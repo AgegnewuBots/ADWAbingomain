@@ -1,0 +1,6 @@
+{
+  "name": "Adwa Bingo",
+  "description": "An elegant, interactive, and beautifully designed Adwa Bingo board with immersive sound cues, real-time board tracking, and high-fidelity user stats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

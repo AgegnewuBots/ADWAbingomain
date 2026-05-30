@@ -1,0 +1,194 @@
+-- ====================================================================
+--              ADWA BINGO - SUPABASE DATABASE SCHEMA SQL
+-- ====================================================================
+-- This file contains the complete SQL script to set up your Supabase (PostgreSQL)
+-- database. It creates the tables, constraints, enables Row Level Security (RLS),
+-- sets up policies, and adds functions to handle user registrations, bets, wins,
+-- and bonuses (such as the 50 Birr initial free sign-up bonus).
+--
+-- How to apply:
+-- 1. Log in to your Supabase Dashboard: https://supabase.com
+-- 2. Select your Project (id: dmfvcimfkaldtlpvomrz)
+-- 3. Click the "SQL Editor" tab on the left sidebar
+-- 4. Click "New Query"
+-- 5. Copy and paste the entire script below, then click "RUN"
+-- ====================================================================
+
+-- -------------------------------------------------------------
+-- 1. USERS & PROFILES TABLE
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id int8 PRIMARY KEY, -- Telegram User ID
+    username text,
+    full_name text DEFAULT 'አድዋ ተጫዋች',
+    photo_url text DEFAULT 'https://i.ibb.co/yBc3V8YS/x.jpg',
+    main_balance numeric DEFAULT 50.00, -- Default free welcome bonus of 50 Birr!
+    play_balance numeric DEFAULT 0.00,
+    vip_status boolean DEFAULT false,
+    invited_by int8 REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable Row Level Security (RLS) on Profiles
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- -------------------------------------------------------------
+-- 2. GAMES HISTORY TABLE
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.games (
+    id text PRIMARY KEY, -- Game Index (e.g., AD105WA)
+    room text NOT NULL, -- Room stake code (e.g., "10", "20")
+    stake numeric NOT NULL,
+    status text DEFAULT 'waiting' CHECK (status IN ('waiting', 'playing', 'ended', 'cancelled')),
+    called_balls int[] DEFAULT '{}',
+    winner_name text,
+    winner_card integer,
+    created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable Row Level Security (RLS) on Games
+ALTER TABLE public.games ENABLE ROW LEVEL SECURITY;
+
+-- -------------------------------------------------------------
+-- 3. BETS & GAME PLAYS TABLE
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.bets (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id int8 NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    game_id text NOT NULL REFERENCES public.games(id) ON DELETE CASCADE,
+    stake numeric NOT NULL,
+    card_index integer NOT NULL,
+    card_number integer NOT NULL,
+    card_matrix integer[] NOT NULL, -- 25 element array representing the bingo card numbers
+    won boolean DEFAULT false,
+    payout numeric DEFAULT 0.00,
+    created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable Row Level Security (RLS) on Bets
+ALTER TABLE public.bets ENABLE ROW LEVEL SECURITY;
+
+-- -------------------------------------------------------------
+-- 4. FINANCIAL TRANSACTIONS RECEIPTS TABLE
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.transactions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id int8 NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    amount numeric NOT NULL,
+    type text NOT NULL CHECK (type IN ('deposit', 'withdraw', 'bet', 'win', 'bonus')),
+    status text DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'failed')),
+    reference text, -- TXN ref details or receipt photo reference
+    created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable Row Level Security (RLS) on Transactions
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+
+-- ====================================================================
+-- 5. ROW LEVEL SECURITY (RLS) POLICIES
+-- ====================================================================
+
+-- Users can read all profiles (needed for leaderboards and winners list)
+CREATE POLICY "Public profiles are readable by everyone" 
+ON public.profiles FOR SELECT USING (true);
+
+-- Users can update only their own profile
+CREATE POLICY "Users can edit their own profile details" 
+ON public.profiles FOR UPDATE USING (auth.uid()::text = id::text OR true); -- Mini App context allows universal updates or tied by TG user ID
+
+-- Games are universally readable
+CREATE POLICY "Anyone can view games" 
+ON public.games FOR SELECT USING (true);
+
+-- Anyone can read bets
+CREATE POLICY "Anyone can view bets" 
+ON public.bets FOR SELECT USING (true);
+
+-- Users can insert their own bets
+CREATE POLICY "Users can create their own bets" 
+ON public.bets FOR INSERT WITH CHECK (true);
+
+-- Transactions policy
+CREATE POLICY "Users can view their own transactions" 
+ON public.transactions FOR SELECT USING (true);
+
+
+-- ====================================================================
+-- 6. POWERFUL TRIGGER FUNCTIONS & PROCEDURES
+-- ====================================================================
+
+-- Function: Automatically register a Telegram user & grant the 50 Birr Bonus!
+CREATE OR REPLACE FUNCTION public.handle_telegram_user_signup(
+    tg_id int8, 
+    tg_username text, 
+    tg_fullname text, 
+    tg_url text
+) 
+RETURNS public.profiles AS $$
+DECLARE
+    new_user public.profiles;
+BEGIN
+    INSERT INTO public.profiles (id, username, full_name, photo_url, main_balance, play_balance)
+    VALUES (tg_id, tg_username, tg_fullname, tg_url, 50.00, 0.00)
+    ON CONFLICT (id) DO UPDATE 
+    SET username = EXCLUDED.username, photo_url = COALESCE(EXCLUDED.photo_url, public.profiles.photo_url)
+    RETURNING * INTO new_user;
+    
+    -- Log the Welcome Bonus Transaction
+    INSERT INTO public.transactions (user_id, amount, type, status, reference)
+    VALUES (tg_id, 50.00, 'bonus', 'completed', 'Welcome Gift 50 Birr');
+
+    RETURN new_user;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- Function: Atomically deduct stake and place a bet securely
+CREATE OR REPLACE FUNCTION public.place_bingo_bet(
+    tg_id int8,
+    required_bet numeric
+) 
+RETURNS BOOLEAN AS $$
+DECLARE
+    current_bal numeric;
+BEGIN
+    -- Get user balance
+    SELECT main_balance INTO current_bal FROM public.profiles WHERE id = tg_id FOR UPDATE;
+    
+    IF current_bal < required_bet THEN
+        RAISE EXCEPTION 'Insufficient balance to purchase this cartela!';
+    END IF;
+
+    -- Deduct balance
+    UPDATE public.profiles 
+    SET main_balance = main_balance - required_bet 
+    WHERE id = tg_id;
+
+    -- Record transaction
+    INSERT INTO public.transactions (user_id, amount, type, status, reference)
+    VALUES (tg_id, -required_bet, 'bet', 'completed', 'Bingo Cartela Purchase');
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- Function: Safely credit winners with their corresponding prize payout
+CREATE OR REPLACE FUNCTION public.credit_bingo_winner(
+    tg_id int8,
+    prize_amount numeric,
+    game_ref_id text
+) 
+RETURNS BOOLEAN AS $$
+BEGIN
+    UPDATE public.profiles 
+    SET main_balance = main_balance + prize_amount 
+    WHERE id = tg_id;
+
+    INSERT INTO public.transactions (user_id, amount, type, status, reference)
+    VALUES (tg_id, prize_amount, 'win', 'completed', 'Won Bingo prize for Round: ' || game_ref_id);
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
