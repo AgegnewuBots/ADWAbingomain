@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img width="1200" alt="Banner" src="https://your-banner-image-url.com/banner.png" />
+<img width="1200" alt="Banner" src="https://i.ibb.co/4ZDnpz0n/x.jpg" />
 
 ### Modern Telegram Bingo Platform
 
