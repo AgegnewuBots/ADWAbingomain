@@ -77,8 +77,8 @@ Real-Time Games • Secure Wallet • Instant Payouts • Telegram Mini App
 ### Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/adwa-bingo.git
-cd adwa-bingo
+git clone https://github.com/AgegnewuBots/ADWAbingomain.git
+cd ADWAbingomain
 ```
 
 ### Install Dependencies
@@ -153,6 +153,20 @@ credit_bingo_winner()
 ## 📜 License
 
 This project is licensed under the MIT License.
+
+---
+
+## 👨‍💻 About the Developer
+
+**Agegnewu Alemayehu Tamiru** is an Ethiopian Software Developer and Product Builder.
+
+His work spans **Python, Telegram bots and automation, APIs, FinTech/payment technology, AI-powered applications, web and mobile development, databases, Linux/VPS infrastructure, Docker, and blockchain/Web3**.
+
+- GitHub: [@AgegnewuBots](https://github.com/AgegnewuBots)
+- Telegram: [@Agegnewu0102](https://t.me/Agegnewu0102)
+- PayLens: https://paylens.et
+
+> Building practical software products from Ethiopia.
 
 ---
 
